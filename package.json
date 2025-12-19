@@ -3,7 +3,7 @@
 	"description": "Sync Keenetic DNS object-groups from v2fly geosite lists",
 	"author": "Emil Yangirov",
 	"license": "MIT",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"main": "dist/index.js",
 	"bin": "dist/index.js",
 	"scripts": {
