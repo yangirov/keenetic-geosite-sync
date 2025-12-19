@@ -1,0 +1,6 @@
+foo.com
+bar.com @Ads
+baz.com @video
+qux.com @ads @video
+regexp:^DoNotLower$ @ads
+keyword:IgnoredKeyword @ads

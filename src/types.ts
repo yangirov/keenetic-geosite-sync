@@ -18,10 +18,17 @@ export type ExecOpts = { dryRun?: boolean };
 // Поддерживаемые типы правил doman-list.
 export type RuleKind = "include" | "domain" | "full" | "keyword" | "regexp";
 
+// Атрибуты правил doman-list (используются для include-фильтров).
+export type DomainAttribute = {
+	key: string;
+	value?: number | boolean;
+};
+
 // Универсальное правило списка доменов.
 export type DomainListRule = {
 	kind: RuleKind;
 	value: string;
+	attrs?: DomainAttribute[];
 };
 
 // Статистика пропусков по keyword/regexp.
