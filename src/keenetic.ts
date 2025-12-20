@@ -38,9 +38,21 @@ export function ndmc(command: string, opts: ExecOpts = {}): string {
 		return "";
 	}
 
-	return execFileSync("ndmc", ["-c", command], {
-		encoding: "utf8",
-	}).trim();
+	try {
+		return execFileSync("ndmc", ["-c", command], {
+			encoding: "utf8",
+		}).trim();
+	} catch (error) {
+		const err = error as NodeJS.ErrnoException;
+		if (err.code === "ENOENT" || err.code === "EACCES") {
+			const hint =
+				"ndmc недоступен (нет бинаря или прав); запустите на Keenetic или включите dryRun";
+			const wrapped = new Error(`${hint}: ${command}`);
+			(wrapped as Error & { cause?: unknown }).cause = err;
+			throw wrapped;
+		}
+		throw error;
+	}
 }
 
 // Безопасный вызов ndmc с подавлением ожидаемых ошибок.

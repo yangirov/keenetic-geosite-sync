@@ -1,0 +1,40 @@
+#!/bin/sh
+START=99
+LOG_FILE="/opt/var/log/geosite-sync.log"
+
+start() {
+	/opt/scripts/geosite-sync.sh
+}
+
+stop() {
+	pkill -f keenetic-geosite-sync || true
+}
+
+restart() {
+	stop
+	sleep 1
+	start
+}
+
+logs() {
+	tail -n 200 "$LOG_FILE" || echo "log not found: $LOG_FILE"
+}
+
+case "$1" in
+	start)
+		start
+		;;
+	stop)
+		stop
+		;;
+	restart)
+		restart
+		;;
+	logs)
+		logs
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart|logs}"
+		exit 1
+		;;
+esac

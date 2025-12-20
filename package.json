@@ -7,7 +7,7 @@
 	"main": "dist/index.js",
 	"bin": "dist/index.js",
 	"scripts": {
-		"build": "tsup && cp config.json dist/config.json",
+		"build": "tsup && cp config.json dist/config.json && cp -r scripts/ dist/scripts",
 		"dev": "tsup --watch",
 		"lint": "npx tsc --noEmit && biome check .",
 		"lint:fix": "npx tsc --noEmit && biome check --write --unsafe .",

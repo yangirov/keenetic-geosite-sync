@@ -79,26 +79,63 @@ ssh root@192.168.1.1 -p 222
 opkg update
 opkg install curl unzip node cron
 
-# Скачивание релиза
+# Скачивание и установка релиза
 cd /opt && curl -L https://github.com/yangirov/keenetic-geosite-sync/releases/latest/download/keenetic-geosite-sync-dist.zip -o /tmp/kgs.zip && mkdir -p /opt/keenetic-geosite-sync && unzip -o /tmp/kgs.zip -d /opt/keenetic-geosite-sync && rm /tmp/kgs.zip
-
-# Запустить синхронизацию
-/opt/bin/node /opt/keenetic-geosite-sync/index.js
 ```
 
 Для проверки без изменений поставьте в конфиге `"dryRun": true`.
 
-После выполнения синхронизации списки доменных имен обновятся и автоматически создадутся правила маршрутизации.
+Конфиг находится в `/opt/keenetic-geosite-sync/config.json` — отредактируйте его перед запуском.
 
 ![](./assets/rules.png)
 
-## Cron и логи
+### API сервиса (порт 3939)
 
-Пример настройки раз в сутки в 03:00:
+HTTP-сервер поднимается автоматически при старте приложения и слушает порт `3939`.
+
+- `/sync` — GET/POST. Запускает синхронизацию. `429`, если уже выполняется; `500` при ошибке.
+- `/clean` — GET/POST. Удаляет все группы/маршруты с префиксом из `config.json`.
+- `/health` — GET. Просто отвечает `200 OK`.
+
+Примеры:
 
 ```bash
-echo '0 3 * * * /opt/bin/node /opt/keenetic-geosite-sync/index.js >> /opt/var/log/geosite-sync.log 2>&1' >> /opt/etc/crontab
-/opt/etc/init.d/S10cron restart 2>/dev/null || true
+curl http://192.168.1.1:3939/health
+curl http://192.168.1.1:3939/sync
+curl http://192.168.1.1:3939/clean
 ```
 
-Логи: `/opt/var/log/geosite-sync.log`
+## Автозапуск через Entware
+
+```bash
+# Создание загрузочного скрипта (путь как в примерах выше)
+mkdir -p /opt/scripts
+cp /opt/keenetic-geosite-sync/scripts/geosite-sync.sh /opt/scripts/geosite-sync.sh
+chmod +x /opt/scripts/geosite-sync.sh
+
+# Создание сервиса Entware
+cp /opt/keenetic-geosite-sync/scripts/S99geosite-sync /opt/etc/init.d/S99geosite-sync
+chmod +x /opt/etc/init.d/S99geosite-sync
+
+# Запуск сервиса
+/opt/etc/init.d/S99geosite-sync start
+
+# Остановка сервиса
+/opt/etc/init.d/S99geosite-sync stop
+
+# Перезапуск сервиса
+/opt/etc/init.d/S99geosite-sync restart
+
+# Логи сервиса
+/opt/etc/init.d/S99geosite-sync logs
+```
+
+## Синхронизация по расписанию
+
+Пример настройки раз в неделю, по субботам в 04:00:
+
+```bash
+echo '0 4 * * 6 curl -s http://127.0.0.1:3939/sync' >> /opt/etc/crontab
+
+/opt/etc/init.d/S10cron restart 2>/dev/null || true
+```

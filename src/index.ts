@@ -1,6 +1,7 @@
 import path from "node:path";
 import { collectDomains, createFetchContext } from "./domainsList";
 import { discoverLists, getRunningConfig, ndmcTry, recreateFqdnGroup } from "./keenetic";
+import { startHttpServer } from "./server";
 import type { Config, DiscoveredList } from "./types";
 import { chunk, desiredGroupNames, isObject, normalizeBaseUrl, readJson } from "./utils";
 
@@ -380,8 +381,12 @@ async function main(): Promise<void> {
 		await dropAll(cfg);
 		return;
 	}
+
+	startHttpServer(cfg, { run: runConfig, drop: dropAll });
 	await runConfig(cfg);
 }
+
+export { createSyncHandler, startHttpServer } from "./server";
 
 if (require.main === module) {
 	main().catch((err) => {
