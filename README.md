@@ -170,7 +170,7 @@ curl http://192.168.1.1:3939/clean
 2. Создайте новый скрипт и вставьте содержимое `scripts/tampermonkey.js`.
 3. Откройте страницу `http://192.168.1.1/staticRoutes/dns` — появится автодополнение по именам из `v2fly/domain-list-community`.
 
-![](./assets/autocomplete.png)
+![](./assets/autocomplete.gif)
 
 ## Синхронизация по расписанию
 
