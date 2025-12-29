@@ -65,6 +65,9 @@
 
 ### Шаг 1. Создайте в разделе "Маршруты DNS" список доменов которые нужно синхронизировать
 
+> [!TIP]
+> Вы можете не создавать списки руками и прописать в конфиге `initialDomains`.
+
 Раздел: `http://192.168.1.1/staticRoutes/dns`
 
 ![](./assets/initial.png)
@@ -76,7 +79,6 @@
 #### Автоматическая установка через публичный OPKG-репозиторий (Entware)
 
 Репозиторий: `https://yangirov.github.io/keenetic-geosite-sync/all`  
-Поддерживаемые архитектуры: mipsel, mips, mips64, aarch64, armv7, x86, x86_64, lexra.
 
 ```bash
 # Подключение к роутеру
@@ -98,8 +100,26 @@ opkg install keenetic-geosite-sync
 
 После установки файлы окажутся в `/opt/keenetic-geosite-sync`, конфиг — `/opt/keenetic-geosite-sync/config.json`.
 
+**Обновление пакета:**
+```bash
+opkg update
+opkg upgrade keenetic-geosite-sync
+```
+
+**Удаление пакета и зависимостей:**
+```bash
+opkg remove --autoremove keenetic-geosite-sync
+```
+
+**Информация об установленной версии:**
+```bash
+opkg info keenetic-geosite-sync
+```
+
+#### Ручная установка (нерекомендуемый способ)
+
 <details>
-<summary>Ручная установка</summary>
+<summary>Подробнее про ручную установку</summary>
 
 ```bash
 # Подключение к роутеру по SSH
@@ -107,13 +127,15 @@ ssh root@192.168.1.1 -p 222
 
 # Установка зависимостей
 opkg update
-opkg install curl unzip node cron
+opkg install node  # обязательно для запуска
+opkg install curl unzip  # опционально, только для скачивания архива
+opkg install cron  # опционально, если нужен запуск по расписанию
 
 # Скачивание и установка релиза
 cd /opt && curl -L https://github.com/yangirov/keenetic-geosite-sync/releases/latest/download/keenetic-geosite-sync-dist.zip -o /tmp/kgs.zip && mkdir -p /opt/keenetic-geosite-sync && unzip -o /tmp/kgs.zip -d /opt/keenetic-geosite-sync && rm /tmp/kgs.zip
 ```
 
-Далее создайте сервисы вручную:
+Далее создайте сервис вручную:
 
 ```bash
 # Создание загрузочного скрипта
@@ -143,6 +165,10 @@ chmod +x /opt/etc/init.d/S99geosite-sync
 Конфиг находится в `/opt/keenetic-geosite-sync/config.json` — отредактируйте его перед запуском.
 </details>
 
+#### Настройка правил
+
+После установки и синхронизации, вы сможете отключать правила маршрутизации.
+
 ![](./assets/rules.png)
 
 ### API сервиса (порт 3939)
@@ -162,15 +188,28 @@ curl http://192.168.1.1:3939/sync
 curl http://192.168.1.1:3939/clean
 ```
 
-## Автокомплит доменов в веб-интерфейсе Keenetic OS
+## Tampermonkey
 
-Для удобного заполнения списков доменов можно поставить юзерскрипт Tampermonkey `scripts/tampermonkey.js`.
+Чтобы упростить работу с доменными списками в веб-интерфейсе Keenetic, есть пользовательский скрипт `scripts/tampermonkey.js`. Он добавляет автокомплит по именам из v2fly/domain-list-community и кнопки для быстрого вызова API сервиса.
+
+### 1. Установка Tampermonkey и скрипта
 
 1. Установите расширение [Tampermonkey](https://www.tampermonkey.net/).
 2. Создайте новый скрипт и вставьте содержимое `scripts/tampermonkey.js`.
-3. Откройте страницу `http://192.168.1.1/staticRoutes/dns` — появится автодополнение по именам из `v2fly/domain-list-community`.
+
+### 2. Автокомплит доменных списков
+
+Откройте страницу `http://192.168.1.1/staticRoutes/dns` — в модальном меню добавления списка появится автодополнение по именам доменов из `v2fly/domain-list-community`.
 
 ![](./assets/autocomplete.gif)
+
+### 3. Кнопки Health/Sync/Clean в UI
+
+В интерфейсе Keenetic появятся кнопки, которые вызывают API сервиса (`/health`, `/sync`, `/clean`) по умолчанию на `http://192.168.1.1:3939`.
+
+Если API у вас на другом хосте/порту — поменяйте константу `API_BASE` в начале скрипта.
+
+![](./assets/api-buttons.png)
 
 ## Синхронизация по расписанию
 
@@ -187,9 +226,9 @@ echo '0 4 * * 6 curl -s http://127.0.0.1:3939/sync' >> /opt/etc/crontab
 
 ## Сборка OPKG пакета
 
-Сборка пакета выполняется в GitHub Actions (`.github/workflows/publish.yml`) при пуше тега. Итоговые ipk публикуются в `https://yangirov.github.io/keenetic-geosite-sync/all` вместе с `Packages/Packages.gz`.
+Сборка пакета выполняется в GitHub Actions (`.github/workflows/publish.yml`) при пушах в `main/master` и тегах `v*.*.*`. Итоговые ipk публикуются в `https://yangirov.github.io/keenetic-geosite-sync/all` вместе с `Packages/Packages.gz`. На тег дополнительно создаётся GitHub Release с `keenetic-geosite-sync-dist.zip` и ipk.
 
-Также можно собрать через Docker (для тестирования):
+Также можно собрать через Docker (для тестирования локально):
 
 ```bash
 docker run --rm -it -v "$PWD":/src -w /src node:20-bookworm bash -lc "apt-get update && apt-get install -y ca-certificates && chmod +x opkg/build.sh && ./opkg/build.sh"
