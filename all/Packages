@@ -1,12 +1,12 @@
 Package: keenetic-geosite-sync
-Version: 1.0.4-1
+Version: 1.0.5-1
 Depends: node
 Section: net
 Architecture: all
 Maintainer: Emil Yangirov
-MD5Sum: c68dd2ed823a09d068d47b3f383dfdf3
-Size: 12658
-Filename: keenetic-geosite-sync_1.0.4-1_all.ipk
+MD5Sum: 47bd1284c8aeb4eedcecdb435140748e
+Size: 12659
+Filename: keenetic-geosite-sync_1.0.5-1_all.ipk
 Description: Sync Keenetic DNS object-groups from v2fly geosite lists
 License: MIT
 Priority: optional
