@@ -172,7 +172,12 @@ export function recreateFqdnGroup(
 	{ dryRun, description }: ExecOpts & { description?: string },
 ): void {
 	ndmcTry(`no object-group fqdn ${groupName}`, { dryRun });
-	ndmc(`object-group fqdn ${groupName}`, { dryRun });
+	const created = ndmcTry(`object-group fqdn ${groupName}`, { dryRun });
+	const creationOk = dryRun || Boolean(created);
+	if (!creationOk) {
+		console.warn(`[ndmc:warn] failed to create group ${groupName}, skipping includes`);
+		return;
+	}
 
 	if (description) {
 		const escaped = description.replace(/"/g, '\\"');
