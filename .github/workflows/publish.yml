@@ -1,0 +1,61 @@
+name: Build and Publish OPKG Repo
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install opkg-utils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ca-certificates git make python3 gettext-base
+          git clone https://git.yoctoproject.org/opkg-utils /tmp/opkg-utils
+          (cd /tmp/opkg-utils && make && sudo make install)
+
+      - name: Build ipk
+        run: |
+          chmod +x opkg/build.sh
+          ./opkg/build.sh
+
+      - name: Prepare OPKG repository
+        run: |
+          rm -rf public && mkdir -p public/all
+          cp build/out/*.ipk public/all/
+          opkg-make-index public/all > public/all/Packages
+          gzip -9fk public/all/Packages
+
+      - name: Deploy to gh-pages
+        env:
+          GH_PAGES_DEPLOY_KEY: ${{ secrets.GH_PAGES_DEPLOY_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          # decode base64-encoded deploy key from secret
+          echo "$GH_PAGES_DEPLOY_KEY" | base64 -d > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          git clone --branch gh-pages git@github.com:${{ github.repository }} gh-pages || (git clone git@github.com:${{ github.repository }} gh-pages && cd gh-pages && git checkout --orphan gh-pages)
+          cd gh-pages
+          rm -rf ./*
+          cp -r ../public/* .
+          git add -A
+          git commit -m "Update repo from Actions ${GITHUB_RUN_ID}" || exit 0
+          git push origin gh-pages
