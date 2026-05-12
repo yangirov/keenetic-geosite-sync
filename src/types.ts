@@ -7,10 +7,13 @@ export type Config = {
 	maxEntriesPerGroup?: number;
 	retries?: number;
 	routeInterface?: string;
+	domains?: string[];
 	initialDomains?: string[];
 	fetchFn?: (url: string, timeoutMs: number) => Promise<string>;
 	runningConfigText?: string;
 };
+
+export type ConfigFile = Config | Config[];
 
 // Опции исполнения команд ndmc.
 export type ExecOpts = { dryRun?: boolean };

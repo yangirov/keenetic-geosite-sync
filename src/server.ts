@@ -1,9 +1,10 @@
 import http from "node:http";
-import type { Config } from "./types";
+import type { ConfigFile } from "./types";
 
 export type ServerDeps = {
-	run?: (cfg: Config) => Promise<void>;
-	drop?: (cfg: Config) => Promise<void>;
+	run?: (cfg: ConfigFile) => Promise<void>;
+	drop?: (cfg: ConfigFile) => Promise<void>;
+	loadConfig?: () => ConfigFile | Promise<ConfigFile>;
 };
 
 export type ServerOpts = {
@@ -14,10 +15,11 @@ export type ServerOpts = {
 };
 
 // Обработчик HTTP-запросов /sync|/clean|/health с защитой от параллельных вызовов.
-export function createSyncHandler(cfg: Config, deps: ServerDeps = {}): http.RequestListener {
+export function createSyncHandler(cfg: ConfigFile, deps: ServerDeps = {}): http.RequestListener {
 	let running = false;
 	const run = deps.run;
 	const drop = deps.drop;
+	const loadConfig = deps.loadConfig;
 
 	return async (req, res) => {
 		const method = req.method ?? "";
@@ -67,10 +69,11 @@ export function createSyncHandler(cfg: Config, deps: ServerDeps = {}): http.Requ
 		console.log(`[serve] manual sync requested from ${req.socket.remoteAddress || "unknown"}`);
 
 		try {
+			const currentConfig = loadConfig ? await loadConfig() : cfg;
 			if (isClean) {
-				await drop?.(cfg);
+				await drop?.(currentConfig);
 			} else {
-				await run?.(cfg);
+				await run?.(currentConfig);
 			}
 			res.statusCode = 200;
 			res.end("OK\n");
@@ -86,7 +89,11 @@ export function createSyncHandler(cfg: Config, deps: ServerDeps = {}): http.Requ
 }
 
 // Поднимает HTTP-сервер с обработчиком /sync|/clean|/health.
-export function startHttpServer(cfg: Config, deps: ServerDeps, opts: ServerOpts = {}): http.Server {
+export function startHttpServer(
+	cfg: ConfigFile,
+	deps: ServerDeps,
+	opts: ServerOpts = {},
+): http.Server {
 	const host = opts.host ?? "0.0.0.0";
 	const port = opts.port ?? 3939;
 	const listen = opts.listen ?? true;

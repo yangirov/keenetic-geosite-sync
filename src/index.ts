@@ -2,13 +2,30 @@ import path from "node:path";
 import { collectDomains, createFetchContext } from "./domainsList";
 import { discoverLists, getRunningConfig, ndmcTry, recreateFqdnGroup } from "./keenetic";
 import { startHttpServer } from "./server";
-import type { Config, DiscoveredList } from "./types";
+import type { Config, ConfigFile, DiscoveredList } from "./types";
 import { chunk, desiredGroupNames, isObject, normalizeBaseUrl, readJson } from "./utils";
 
 const DEFAULT_BASE_URL =
 	"https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/";
 const DEFAULT_MAX_ENTRIES = 300;
 const DEFAULT_DELAY_BETWEEN_LISTS_MS = 500;
+
+type RunOptions = {
+	explicitScope?: boolean;
+	usedIndexesByPrefix?: Map<string, Set<number>>;
+};
+
+function ensureConfigObject(value: unknown, label: string): Config {
+	if (!isObject(value)) throw new Error(`Invalid config entry: ${label}`);
+	return value as Config;
+}
+
+export function normalizeConfigFile(value: ConfigFile): Config[] {
+	if (Array.isArray(value)) {
+		return value.map((item, index) => ensureConfigObject(item, `[${index}]`));
+	}
+	return [ensureConfigObject(value, "root")];
+}
 
 // Убираем служебные суффиксы вроде [1/2] или "-2" из описания.
 function stripChunkSuffix(desc: string): string {
@@ -46,6 +63,21 @@ function collectUsedIndexes(runningConfig: string, prefix: string): Set<number> 
 		if (match) used.add(Number.parseInt(match[1], 10));
 	}
 	return used;
+}
+
+function getUsedIndexes(
+	runningConfig: string,
+	prefix: string,
+	shared?: Map<string, Set<number>>,
+): Set<number> {
+	if (!shared) return collectUsedIndexes(runningConfig, prefix);
+
+	const existing = shared.get(prefix);
+	if (existing) return existing;
+
+	const created = collectUsedIndexes(runningConfig, prefix);
+	shared.set(prefix, created);
+	return created;
 }
 
 // Берём следующий свободный индекс и имя группы.
@@ -134,6 +166,7 @@ function createRouteState(
 	dryRun: boolean,
 ): {
 	ensure: (groupName: string, iface: string | undefined, templateHint?: RouteInfo) => void;
+	restore: (groupName: string) => void;
 	stats: { created: number };
 	templates: RouteIndex;
 } {
@@ -148,16 +181,9 @@ function createRouteState(
 	const stats = { created: 0 };
 	const defaults: RouteInfo = { auto: true, reject: false, disabled: false };
 
-	function ensure(groupName: string, iface: string | undefined, templateHint?: RouteInfo) {
-		if (!iface) return;
+	function emitRoute(groupName: string, iface: string, info: RouteInfo) {
 		const key = `${groupName}::${iface}`;
 		if (seen.has(key)) return;
-
-		const template =
-			templateHint ??
-			templateRoutes.get(key) ??
-			findRouteTemplate(groupName, iface, templateRoutes);
-		const info = template ?? defaults;
 
 		const tokens = ["dns-proxy route object-group", groupName, iface];
 		if (info.auto) tokens.push("auto");
@@ -175,7 +201,24 @@ function createRouteState(
 		stats.created += 1;
 	}
 
-	return { ensure, stats, templates: templateRoutes };
+	function ensure(groupName: string, iface: string | undefined, templateHint?: RouteInfo) {
+		if (!iface) return;
+		const key = `${groupName}::${iface}`;
+		const template =
+			templateHint ??
+			templateRoutes.get(key) ??
+			findRouteTemplate(groupName, iface, templateRoutes);
+		emitRoute(groupName, iface, template ?? defaults);
+	}
+
+	function restore(groupName: string) {
+		for (const [key, info] of templateRoutes) {
+			const [routeGroup, iface] = key.split("::");
+			if (routeGroup === groupName && iface) emitRoute(groupName, iface, info);
+		}
+	}
+
+	return { ensure, restore, stats, templates: templateRoutes };
 }
 
 // Добавляем initialDomains, если подходящих групп ещё нет.
@@ -184,13 +227,14 @@ function provisionInitialDomains(
 	cfg: Config,
 	prefix: string,
 	runningConfig: string,
+	usedIndexes?: Set<number>,
 ): DiscoveredList[] {
 	if (!cfg.initialDomains?.length) return existing;
 	if (existing.length) {
 		return existing;
 	}
 
-	const used = collectUsedIndexes(runningConfig, prefix);
+	const used = usedIndexes ?? collectUsedIndexes(runningConfig, prefix);
 	for (const item of existing) {
 		const match = item.name.match(new RegExp(`^${prefix}(\\d+)$`));
 		if (match) used.add(Number.parseInt(match[1], 10));
@@ -215,6 +259,41 @@ function provisionInitialDomains(
 	}
 
 	return [...existing, ...created];
+}
+
+function scopedListsFromConfig(
+	existing: DiscoveredList[],
+	cfg: Config,
+	prefix: string,
+	usedIndexes: Set<number>,
+): DiscoveredList[] {
+	const rawDomains = cfg.domains?.length ? cfg.domains : (cfg.initialDomains ?? []);
+	const bySlug = new Map<string, DiscoveredList>();
+	for (const item of existing) bySlug.set(item.slug, item);
+
+	const result: DiscoveredList[] = [];
+	const seenSlugs = new Set<string>();
+
+	for (const raw of rawDomains) {
+		const desc = String(raw || "").trim();
+		const slug = slugifyDescription(desc);
+		if (!desc || !slug || seenSlugs.has(slug)) continue;
+		seenSlugs.add(slug);
+
+		const found = bySlug.get(slug);
+		if (found) {
+			result.push(found);
+			continue;
+		}
+
+		const { name } = nextAvailableName(prefix, usedIndexes);
+		const item: DiscoveredList = { name, slug, description: desc };
+		result.push(item);
+		bySlug.set(slug, item);
+		console.log(`[init] add ${name} (${desc} -> ${slug})`);
+	}
+
+	return result.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 // Ищем имена групп с заданным префиксом.
@@ -250,7 +329,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 // Основной сценарий: поиск групп, загрузка списков, пересоздание и маршруты.
-export async function runConfig(cfg: Config): Promise<void> {
+export async function runConfig(cfg: Config, opts: RunOptions = {}): Promise<void> {
 	const dryRun = Boolean(cfg.dryRun);
 	const baseUrl = normalizeBaseUrl(cfg.baseUrl ?? DEFAULT_BASE_URL);
 	const timeoutMs = cfg.timeoutMs ?? 20000;
@@ -261,9 +340,11 @@ export async function runConfig(cfg: Config): Promise<void> {
 	const ctx = createFetchContext(baseUrl, timeoutMs, retries, fetchFn);
 
 	const runningConfig = cfg.runningConfigText ?? getRunningConfig({ dryRun });
-	const _existingGroups = new Set(findGroupNames(runningConfig, ""));
 	const discovered = discoverLists(runningConfig, prefix);
-	const lists = dedupeLists(provisionInitialDomains(discovered, cfg, prefix, runningConfig));
+	const usedIndexes = getUsedIndexes(runningConfig, prefix, opts.usedIndexesByPrefix);
+	const lists = opts.explicitScope
+		? scopedListsFromConfig(discovered, cfg, prefix, usedIndexes)
+		: dedupeLists(provisionInitialDomains(discovered, cfg, prefix, runningConfig, usedIndexes));
 	const routeState = createRouteState(runningConfig, dryRun);
 
 	console.log(
@@ -325,6 +406,7 @@ export async function runConfig(cfg: Config): Promise<void> {
 			const entries = chunks[i];
 			const description = chunks.length > 1 ? `${baseDescription} ${i + 1}` : baseDescription;
 			recreateFqdnGroup(groupName, entries, { dryRun, description });
+			routeState.restore(groupName);
 		}
 
 		if (chunks.length > 1) {
@@ -353,6 +435,16 @@ export async function runConfig(cfg: Config): Promise<void> {
 	);
 }
 
+export async function runConfigFile(cfg: ConfigFile): Promise<void> {
+	const configs = normalizeConfigFile(cfg);
+	const usedIndexesByPrefix = new Map<string, Set<number>>();
+	const explicitScope = Array.isArray(cfg);
+
+	for (const profile of configs) {
+		await runConfig(profile, { explicitScope, usedIndexesByPrefix });
+	}
+}
+
 // Удаляем все найденные группы и соответствующие маршруты.
 export async function dropAll(cfg: Config): Promise<void> {
 	const dryRun = Boolean(cfg.dryRun);
@@ -369,26 +461,41 @@ export async function dropAll(cfg: Config): Promise<void> {
 	console.log("Drop complete.");
 }
 
+export async function dropConfigFile(cfg: ConfigFile): Promise<void> {
+	for (const profile of normalizeConfigFile(cfg)) {
+		await dropAll(profile);
+	}
+}
+
+function loadConfigFile(configPath: string): ConfigFile {
+	const cfg = readJson<unknown>(configPath, null);
+	if (Array.isArray(cfg)) return cfg.map((item, index) => ensureConfigObject(item, `[${index}]`));
+	if (isObject(cfg)) return cfg as Config;
+	throw new Error(`Config not found or invalid JSON: ${configPath}`);
+}
+
 // Точка входа CLI: выбирает режим синхронизации или очистки.
 async function main(): Promise<void> {
 	const cmd = process.argv[2];
 	const isDrop = cmd === "clean";
 	const isSyncOnce = cmd === "sync" || cmd === "run";
 	const configPath = path.join(__dirname, "config.json");
-	const cfg = readJson<Config | null>(configPath, null);
-	if (!cfg || !isObject(cfg)) throw new Error(`Config not found or invalid JSON: ${configPath}`);
-	console.log(`[config] path=${configPath}`);
+	const loadConfig = () => {
+		const cfg = loadConfigFile(configPath);
+		console.log(`[config] path=${configPath}`);
+		return cfg;
+	};
 	if (isDrop) {
-		await dropAll(cfg);
+		await dropConfigFile(loadConfig());
 		return;
 	}
 
 	if (isSyncOnce) {
-		await runConfig(cfg);
+		await runConfigFile(loadConfig());
 		return;
 	}
 
-	startHttpServer(cfg, { run: runConfig, drop: dropAll });
+	startHttpServer(loadConfig(), { run: runConfigFile, drop: dropConfigFile, loadConfig });
 	console.log("[serve] waiting for /sync or /clean HTTP calls; no auto-sync on start");
 }
 

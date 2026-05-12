@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { collectDomains, createFetchContext, parseDomainList } from "../src/domainsList";
 import * as cli from "../src/index";
 import { createSyncHandler } from "../src/server";
-import type { Config } from "../src/types";
+import type { Config, ConfigFile } from "../src/types";
 
 const repoRoot = path.join(__dirname, "..");
 const dataRoot = path.join(repoRoot, "tests", "fixtures", "data");
@@ -61,6 +61,30 @@ async function runCase(cfg: Config): Promise<string> {
 
 	try {
 		await cli.runConfig(cfg);
+	} finally {
+		logSpy.mockRestore();
+		warnSpy.mockRestore();
+		errSpy.mockRestore();
+	}
+
+	return logs.join("\n");
+}
+
+// Запуск сценария для полного config.json с object/array форматом.
+async function runConfigFile(cfg: ConfigFile): Promise<string> {
+	const logs: string[] = [];
+	const logSpy = vi.spyOn(console, "log").mockImplementation((...args) => {
+		logs.push(args.join(" "));
+	});
+	const warnSpy = vi.spyOn(console, "warn").mockImplementation((...args) => {
+		logs.push(args.join(" "));
+	});
+	const errSpy = vi.spyOn(console, "error").mockImplementation((...args) => {
+		logs.push(args.join(" "));
+	});
+
+	try {
+		await cli.runConfigFile(cfg);
 	} finally {
 		logSpy.mockRestore();
 		warnSpy.mockRestore();
@@ -135,6 +159,23 @@ describe("сценарии cli", () => {
 	it("добавляет маршруты dns-proxy при указанном интерфейсе", async () => {
 		const out = await runCase(makeConfig({ routeInterface: "Wireguard0" }));
 		expect(out).toContain("dns-proxy route object-group domain-list5 Wireguard0 auto");
+	});
+
+	it("сохраняет ручные маршруты после пересоздания группы", async () => {
+		const out = await runCase(
+			makeConfig({
+				runningConfigText: `
+object-group fqdn domain-list0
+ description Testlist
+!
+dns-proxy route object-group domain-list0 Wireguard0 auto
+dns-proxy route object-group domain-list0 Proxy0 auto reject
+`,
+			}),
+		);
+
+		expect(out).toContain("dns-proxy route object-group domain-list0 Wireguard0 auto");
+		expect(out).toContain("dns-proxy route object-group domain-list0 Proxy0 auto reject");
 	});
 
 	it("копирует флаг disable на новые части сплита", async () => {
@@ -389,6 +430,47 @@ object-group fqdn domain-list1
 		expect(out).toContain("[discover:warn] skip domain-list0: empty or invalid description");
 		expect(out).toContain("[discover:warn] multiple descriptions for domain-list1");
 	});
+
+	it("оставляет object config обратно совместимым", async () => {
+		const out = await runConfigFile(makeConfig({ routeInterface: "Wireguard0" }));
+
+		expect(out).toContain('[discover] found 2 group(s) with prefix "domain-list"');
+		expect(out).toContain("[sync] domain-list4 <= testlist: 5 domain(s)");
+		expect(out).toContain("[sync] domain-list5 <= other: 2 domain(s)");
+		expect(out).toContain("dns-proxy route object-group domain-list5 Wireguard0 auto");
+	});
+
+	it("синхронизирует array config только по явным спискам каждого профиля", async () => {
+		const runningConfigText = `
+object-group fqdn domain-list0
+ description Testlist
+!
+`;
+		const out = await runConfigFile([
+			makeConfig({
+				runningConfigText,
+				routeInterface: "Proxy0",
+				domains: ["Testlist", "Other"],
+			}),
+			makeConfig({
+				runningConfigText,
+				routeInterface: "Wireguard0",
+				initialDomains: ["OpenAI"],
+				fetchFn: async (url) => {
+					if (url.endsWith("openai")) return "openai.com\n";
+					return fetchFn(url);
+				},
+			}),
+		]);
+
+		expect(out).toContain("[sync] domain-list0 <= testlist");
+		expect(out).toContain("dns-proxy route object-group domain-list0 Proxy0 auto");
+		expect(out).toContain("[init] add domain-list1 (Other -> other)");
+		expect(out).toContain("dns-proxy route object-group domain-list1 Proxy0 auto");
+		expect(out).toContain("[init] add domain-list2 (OpenAI -> openai)");
+		expect(out).toContain("dns-proxy route object-group domain-list2 Wireguard0 auto");
+		expect(out).not.toContain("dns-proxy route object-group domain-list0 Wireguard0 auto");
+	});
 });
 
 describe("http server", () => {
@@ -479,6 +561,35 @@ describe("http server", () => {
 		expect(res.status).toBe(200);
 		expect(runSpy).not.toHaveBeenCalled();
 		expect(dropSpy).toHaveBeenCalledTimes(1);
+	});
+
+	it("перечитывает config provider для каждого /sync", async () => {
+		const configs = [
+			makeConfig({ routeInterface: "Wireguard0" }),
+			makeConfig({ routeInterface: "Proxy0" }),
+		];
+		const runSpy = vi.fn().mockResolvedValue(undefined);
+		const handler = createSyncHandler(makeConfig(), {
+			run: runSpy,
+			loadConfig: () => configs.shift() ?? makeConfig({ routeInterface: "Proxy0" }),
+		});
+
+		const first = makeReqRes("/sync", "GET");
+		await handler(first.req, first.res);
+		expect((await first.awaitEnd).status).toBe(200);
+
+		const second = makeReqRes("/sync", "GET");
+		await handler(second.req, second.res);
+		expect((await second.awaitEnd).status).toBe(200);
+
+		expect(runSpy).toHaveBeenNthCalledWith(
+			1,
+			expect.objectContaining({ routeInterface: "Wireguard0" }),
+		);
+		expect(runSpy).toHaveBeenNthCalledWith(
+			2,
+			expect.objectContaining({ routeInterface: "Proxy0" }),
+		);
 	});
 });
 

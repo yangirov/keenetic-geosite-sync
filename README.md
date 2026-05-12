@@ -24,9 +24,11 @@
 - превращает описание группы в имя файла из v2fly (`Facebook [1/2]` → `facebook`, `Google Play` → `google-play`)
 - тянет `data/<name>`, раскрывает `include:`, игнорирует пустые/`keyword:`/`regexp:` правила
 - пересобирает группы доменов; при превышении лимита режет на части `<name>`, `<name>-2`, `<name>-3` и т.д.
-- сохраняет состояние маршрутов (`auto`/`reject`/`disable`) и переносит его на новые части сплита
+- сохраняет существующие маршруты DNS (`auto`/`reject`/`disable`) после пересоздания групп и добавляет маршруты на интерфейс из конфига
 
 ## Конфиг `config.json`
+
+Поддерживаются два формата: один объект конфига или массив профилей.
 
 Ключи:
 - `baseUrl` — источник доменных листов.
@@ -34,10 +36,14 @@
 - `timeoutMs`, `retries` — таймаут в миллисекундах и количество попыток загрузки.
 - `maxEntriesPerGroup` — максимум доменов в группе; при превышении создаются `<name>-2`, `<name>-3` и т.д. По умолчанию 300.
 - `routeInterface` — интерфейс, через который будут идти маршруты. Например, `Wireguard0` (можно узнать через команду `show interface` в CLI `http://<router_id>/a`).
+- `domains` — явный список описаний доменных групп для профиля. Используется в массиве профилей, чтобы разные списки можно было привязать к разным интерфейсам.
 - `initialDomains` — если групп с нужным префиксом нет, создадутся новые группы с описанием из списка и маршрутом (если задан интерфейс).
+  В массиве профилей также работает как совместимый alias для `domains`.
 - `dryRun` — только логирует команды `ndmc`, без применения.
 
-Пример:
+Одиночный объект сохраняет старое поведение: скрипт ищет все группы с `prefix`, а `initialDomains` используется только если таких групп нет.
+
+Пример одиночного конфига:
 ```json
 {
   "baseUrl": "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/",
@@ -62,6 +68,32 @@
   ],
   "dryRun": false
 }
+```
+
+Пример нескольких профилей с одним `prefix`, но разными интерфейсами:
+```json
+[
+  {
+    "baseUrl": "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/",
+    "prefix": "domain-list",
+    "timeoutMs": 20000,
+    "retries": 3,
+    "maxEntriesPerGroup": 300,
+    "routeInterface": "Proxy0",
+    "domains": ["YouTube", "Instagram"],
+    "dryRun": false
+  },
+  {
+    "baseUrl": "https://raw.githubusercontent.com/v2fly/domain-list-community/master/data/",
+    "prefix": "domain-list",
+    "timeoutMs": 20000,
+    "retries": 3,
+    "maxEntriesPerGroup": 300,
+    "routeInterface": "Wireguard0",
+    "domains": ["OpenAI", "Anthropic", "Discord"],
+    "dryRun": false
+  }
+]
 ```
 
 ## Быстрый старт
@@ -178,6 +210,7 @@ chmod +x /opt/etc/init.d/S99geosite-sync
 
 HTTP-сервер поднимается автоматически при старте приложения и слушает порт `3939`.
 Автосинхронизации при старте нет — дерните `/sync` вручную или настройте cron.
+`config.json` перечитывается на каждый `/sync` и `/clean`, поэтому изменение `routeInterface` или списка `domains` не требует рестарта сервиса.
 
 - `/sync` — GET/POST. Запускает синхронизацию. `429`, если уже выполняется; `500` при ошибке.
 - `/clean` — GET/POST. Удаляет все группы/маршруты с префиксом из `config.json`.
