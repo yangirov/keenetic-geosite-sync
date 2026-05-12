@@ -4,8 +4,8 @@ Depends: node
 Section: net
 Architecture: all
 Maintainer: Emil Yangirov
-MD5Sum: 1097ec1dc577077559d6e78d6424c28d
-Size: 14086
+MD5Sum: f547a1fd4401b3f5ca5544bfb3ce828e
+Size: 14089
 Filename: keenetic-geosite-sync_1.0.8-1_all.ipk
 Description: Sync Keenetic DNS object-groups from v2fly geosite lists
 License: MIT
