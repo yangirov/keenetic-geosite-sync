@@ -129,8 +129,8 @@
 ssh root@192.168.1.1 -p 222
 
 # Зависимости для HTTPS-загрузки
-opkg update
-opkg install ca-certificates wget-ssl
+opkg update --force-space
+opkg install ca-certificates wget-ssl --force-space
 opkg remove wget-nossl 2>/dev/null || true
 
 # Подключаем репозиторий
@@ -138,16 +138,16 @@ mkdir -p /opt/etc/opkg
 echo "src/gz kgs https://yangirov.github.io/keenetic-geosite-sync/all" > /opt/etc/opkg/kgs.conf
 
 # Установка пакета
-opkg update
-opkg install keenetic-geosite-sync
+opkg update --force-space
+opkg install keenetic-geosite-sync --force-space
 ```
 
 После установки файлы окажутся в `/opt/keenetic-geosite-sync`, конфиг — `/opt/keenetic-geosite-sync/config.json`.
 
 **Обновление пакета:**
 ```bash
-opkg update
-opkg upgrade keenetic-geosite-sync
+opkg update --force-space
+opkg upgrade keenetic-geosite-sync --force-space
 ```
 
 **Удаление пакета и зависимостей:**
@@ -170,10 +170,10 @@ opkg info keenetic-geosite-sync
 ssh root@192.168.1.1 -p 222
 
 # Установка зависимостей
-opkg update
-opkg install node  # обязательно для запуска
-opkg install curl unzip  # опционально, только для скачивания архива
-opkg install cron  # опционально, если нужен запуск по расписанию
+opkg update --force-space
+opkg install node --force-space  # обязательно для запуска
+opkg install curl unzip --force-space  # опционально, только для скачивания архива
+opkg install cron --force-space # опционально, если нужен запуск по расписанию
 
 # Скачивание и установка релиза
 cd /opt && curl -L https://github.com/yangirov/keenetic-geosite-sync/releases/latest/download/keenetic-geosite-sync-dist.zip -o /tmp/kgs.zip && mkdir -p /opt/keenetic-geosite-sync && unzip -o /tmp/kgs.zip -d /opt/keenetic-geosite-sync && rm /tmp/kgs.zip
@@ -261,8 +261,8 @@ curl http://192.168.1.1:3939/clean
 Пример настройки раз в неделю, по субботам в 04:00:
 
 ```bash
-opkg update
-opkg install cron
+opkg update --force-space
+opkg install cron --force-space
 
 echo '0 4 * * 6 curl -s http://127.0.0.1:3939/sync' >> /opt/etc/crontab
 
